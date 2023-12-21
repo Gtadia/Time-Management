@@ -372,7 +372,6 @@ async function updateValues(auth, spreadsheetId, range, valueInputOption, values
  */
 async function moveCompletedTasks(auth, spreadsheetId, sheetFrom, sheetFromName, sheetTo, sheetToName) {
   const {google} = require('googleapis');
-  const service = google.sheets({version: 'v4', auth});
 
   // Reading 'Completed' row of 'sheetFrom'
   let completedChecklist;
@@ -417,7 +416,7 @@ async function moveCompletedTasks(auth, spreadsheetId, sheetFrom, sheetFromName,
 //     // TODO - Once promise is completed, THEN complete message is sent, and then the next code can be completed
 //     appendData(auth, spreadsheetId, sheetToName, completedDataList);
 //   }, 1000);
-//   return 200; // Code 200 means successful
+  return 200; // Code 200 means successful
 }
 
 /**
@@ -425,7 +424,9 @@ async function moveCompletedTasks(auth, spreadsheetId, sheetFrom, sheetFromName,
  * @param {string} auth
  * @param {boolean} moveToCompletedTabOrNot
  */
-async function markedAsComplete(auth, moveToCompletedTabOrNot) {
+async function markedAsComplete(auth, moveToCompletedTabOrNot = false) {
+    const {google} = require('googleapis');
+    const service = google.sheets({version: 'v4', auth});
 
 }
 
