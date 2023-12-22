@@ -1,19 +1,40 @@
+/**
+ * @ese https://stackoverflow.com/questions/69099763/referenceerror-require-is-not-defined-in-es-module-scope-you-can-use-import-in
+ */
+import { createRequire } from "module";
+const require = createRequire(import.meta.url);
+
 const fs = require('fs').promises;
 const path = require('path');
 const process = require('process');
 const {authenticate} = require('@google-cloud/local-auth');
 const {google} = require('googleapis');
 const { write } = require('fs');
+const { create } = require('domain');
 
-// If modifying these scopes, delete token.json.
 const SCOPES = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive'];
-// The file token.json stores the user's access and refresh tokens, and is
-// created automatically when the authorization flow completes for the first
-// time.
 const TOKEN_PATH = path.join(process.cwd(), 'token.json');
 const CREDENTIALS_PATH = path.join(process.cwd(), 'credentials.json');
-// const GOOGLE_APPLICATION_CREDENTIALS = path.join(process.cwd(), 'service.json');
 let isPromisePending = [];
+
+/**
+ * Load or request or authorization to call APIs.
+ *
+ */
+async function authorize() {
+    let client = await loadSavedCredentialsIfExist();
+    if (client) {
+      return client;
+    }
+    client = await authenticate({
+      scopes: SCOPES,
+      keyfilePath: CREDENTIALS_PATH,
+    });
+    if (client.credentials) {
+      await saveCredentials(client);
+    }
+    return client;
+  }
 
 /**
  * Reads previously authorized credentials from the save file.
@@ -50,22 +71,204 @@ async function saveCredentials(client) {
 }
 
 /**
- * Load or request or authorization to call APIs.
- *
+ * Create a google spreadsheet
+ * @param {string} title Spreadsheets title
+ * @return {string} Created spreadsheets ID
  */
-async function authorize() {
-  let client = await loadSavedCredentialsIfExist();
-  if (client) {
-    return client;
-  }
-  client = await authenticate({
-    scopes: SCOPES,
-    keyfilePath: CREDENTIALS_PATH,
-  });
-  if (client.credentials) {
-    await saveCredentials(client);
-  }
-  return client;
+async function createSpreadsheet(auth, title = 'Time Management App', sheetNames = ['upcoming', 'current', 'completed']) { // So things google says is async NEEDS to be async (good to know I guess)
+    const service = google.sheets({version: 'v4', auth});
+    const resource = {
+        properties: {
+            title,
+        },
+        sheets: [
+            {
+                properties: {
+                    "title": sheetNames[0],
+                    "tabColor": {
+                            "red": 0.2,
+                            "green": 0.2,
+                            "blue": 1,
+                            "alpha": 1
+                        }
+                }
+            },
+            {
+                properties: {
+                    "title": sheetNames[1],
+                    "tabColor": {
+                            "red": 0.2,
+                            "green": 1,
+                            "blue": 0.2,
+                            "alpha": 1
+                        }
+                }
+            },
+            {
+                properties: {
+                    "title": sheetNames[2],
+                    "tabColor": {
+                            "red": 1,
+                            "green": 0.2,
+                            "blue": 0.2,
+                            "alpha": 1
+                        }
+                }
+            }
+        ]
+    };
+    try {
+        const spreadsheet = await service.spreadsheets.create({
+            resource,
+            fields: 'spreadsheetId',
+        });
+        console.log(`Spreadsheet ID: ${spreadsheet.data.spreadsheetId}`);
+        return `${spreadsheet.data.spreadsheetId}`;
+    } catch (err) {
+        // TODO (developer) - Handle exception
+        throw err;
+    }
+}
+
+/**
+ * Create a folder and prints the folder ID
+ * @return{obj} folder Id
+ * */
+async function createFolder(auth, filename = 'Time Management App') {
+    const service = google.drive({version: 'v3', auth});
+
+    const fileMetadata = {
+        name: filename,
+        mimeType: 'application/vnd.google-apps.folder',
+        folderColorRgb: "#42d692",
+    };
+    try {
+        const file = await service.files.create({
+        resource: fileMetadata,
+        fields: 'id',
+        });
+        console.log('Folder Id:', file.data.id);
+        return file.data.id;
+    } catch (err) {
+        // TODO(developer) - Handle error
+        throw err;
+    }
+}
+
+/**
+ * Change the file's modification timestamp.
+ * @param{string} fileId Id of the file to move
+ * @param{string} folderId Id of the folder to move
+ * @return{obj} file status
+ * */
+async function moveFileToFolder(auth, fileId, folderId) {
+    const {google} = require('googleapis');
+
+    const service = google.drive({version: 'v3', auth});
+
+    try {
+        // Retrieve the existing parents to remove
+        const file = await service.files.get({
+            fileId: fileId,
+            fields: 'parents',
+        });
+
+        // Move the file to the new folder
+        const previousParents = file.data.parents.join(',');
+        const files = await service.files.update({
+            fileId: fileId,
+            addParents: folderId,
+            removeParents: previousParents,
+            fields: 'id, parents'
+        });
+        // console.log(files.status);
+        return files.status;
+    } catch (err) {
+        // TODO(developer) - Handle error
+        throw err;
+    }
+}
+
+async function createNewSheetTab(auth, ssID) { // TODO - Add title param and color obj
+    const service = google.sheets({ version: 'v4', auth });
+    const requests = [];
+  
+    const title = 'current';
+    const title1 = 'time management';
+    const spreadsheetId = ssID;
+  
+    // Change the spreadsheet's title.
+    // TODO - We Don't really need this, we just need to figure out how to rename the sheet when we create the sheet (OR the start could just be a batchUpdate)
+    requests.push({
+      updateSpreadsheetProperties: {
+        properties: {
+          "title": title1,
+        },
+        fields: 'title',
+      },
+    });
+
+    // Add new sheet to spreadsheet .
+    requests.push({
+      addSheet: {     // NOT AddSheetRequest
+        properties: {
+            "title": title,
+            "tabColor": {
+              "red": 0.2,
+              "green": 1,
+              "blue": 0.2,
+              "alpha": 1
+            }
+        },
+      },
+    });
+    // Add additional requests (operations) ...
+    const batchUpdateRequest = {requests};
+    try {
+      const response = await service.spreadsheets.batchUpdate({
+        spreadsheetId,
+        resource: batchUpdateRequest,
+      });
+      return response;
+    } catch (err) {
+      // TODO (developer) - Handle exception
+      throw err;
+    }
+}
+
+// Assuming auth has already been generated
+const getSheets = async (auth, spreadsheetId) => {
+    const { google } = require("googleapis");
+
+    const sheets = google.sheets({version: "v4", auth});
+    const result = (await sheets.spreadsheets.get({
+        spreadsheetId
+    })).data.sheets.map((sheet) => {
+        return [sheet.properties.title, sheet.properties.sheetId]
+    })
+    return result;
+}
+
+async function deleteSheetTab(auth, ssID, sheetTabID) {
+    const service = google.sheets({ version: 'v4', auth });
+    const requests = [];
+
+    requests.push({
+        deleteSheet: {
+        sheetId: sheetTabID
+        }
+    });
+
+    const batchUpdateRequest = {requests};
+    try {
+        const response = await service.spreadsheets.batchUpdate({
+        spreadsheetId: ssID,
+        resource: batchUpdateRequest,
+        });
+        return response;
+    } catch (err) {
+        throw err;
+    }
 }
 
 /**
@@ -82,21 +285,6 @@ async function readData(auth, ssID, sheetName = 'current', range = 'A2:E') {
   });
   const rows = res.data.values;
   return rows;
-  // if (!rows || rows.length === 0) {
-  //   console.log('No data found.');
-  //   return;
-  // }
-  // // console.log('Name, Major:');
-  // rows.forEach((row) => {
-  //   // Print columns A and E, which correspond to indices 0 and 4.
-  //   // console.log(`${row[0]}, ${row[4]}`);
-  //   row.forEach(
-  //     (element) => {
-  //       process.stdout.write(element + "\t");
-  //     }
-  //   );
-  //   console.log();
-  // });
 }
 
 async function appendData(auth, ssID, sheetName, values) {
@@ -127,208 +315,28 @@ async function appendData(auth, ssID, sheetName, values) {
   );
 }
 
-async function createNewSheetTab(auth, ssID) { // TODO - Add title param and color obj
-  const {google} = require('googleapis');
-
-  const service = google.sheets({ version: 'v4', auth });
-  const requests = [];
-
-  const title = 'current';
-  const title1 = 'time management';
-  const spreadsheetId = ssID;
-
-  // Change the spreadsheet's title.
-  requests.push({
-    updateSpreadsheetProperties: {
-      properties: {
-        "title": title1,
-      },
-      fields: 'title',
-    },
-  });
-
-  // Add new sheet to spreadsheet .
-  requests.push({
-    addSheet: {     // NOT AddSheetRequest
-      properties: {
-          "title": title,
-          "tabColor": {
-            "red": 0.2,
-            "green": 1,
-            "blue": 0.2,
-            "alpha": 1
-          }
-      },
-    },
-  });
-  // Add additional requests (operations) ...
-  const batchUpdateRequest = {requests};
-  try {
-    const response = await service.spreadsheets.batchUpdate({
-      spreadsheetId,
-      resource: batchUpdateRequest,
-    });
-    return response;
-  } catch (err) {
-    // TODO (developer) - Handle exception
-    throw err;
-  }
-}
-
-async function deleteSheetTab(auth, ssID, sheetTabID) {
-  const {google} = require('googleapis');
-
-  const service = google.sheets({ version: 'v4', auth });
-  const requests = [];
-
-  requests.push({
-    deleteSheet: {
-      sheetId: sheetTabID
-    }
-  });
-
-  const batchUpdateRequest = {requests};
-  try {
-    const response = await service.spreadsheets.batchUpdate({
-      spreadsheetId: ssID,
-      resource: batchUpdateRequest,
-    });
-    return response;
-  } catch (err) {
-    throw err;
-  }
-}
-
 async function deleteRow(auth, ssID, sheetTabID, rowNum) {
-  const {google} = require('googleapis');
+    const service = google.sheets({ version: 'v4', auth });
+    const requests = [{
+        deleteDimension: {
+        range: {
+            sheetId: sheetTabID,
+            dimension: "ROWS",
+            startIndex: rowNum - 1,
+            endIndex: rowNum
+        }
+        }
+    }];
 
-  const service = google.sheets({ version: 'v4', auth });
-  const requests = [{
-    deleteDimension: {
-      range: {
-        sheetId: sheetTabID,
-        dimension: "ROWS",
-        startIndex: rowNum - 1,
-        endIndex: rowNum
-      }
-    }
-  }];
-
-  const batchUpdateRequest = {requests};
-  try {
-    const response = await service.spreadsheets.batchUpdate({
-      spreadsheetId: ssID,
-      resource: batchUpdateRequest,
-    });
-    return response;
-  } catch (err) {
-    throw err;
-  }
-}
-
-// Assuming auth has already been generated
-const getSheets = async (auth, spreadsheetId) => {
-  const { google } = require("googleapis");
-
-  const sheets = google.sheets({version: "v4", auth});
-  const result = (await sheets.spreadsheets.get({
-    spreadsheetId
-  })).data.sheets.map((sheet) => {
-    return [sheet.properties.title, sheet.properties.sheetId]
-  })
-  return result
-}
-
-/**
- * Create a folder and prints the folder ID
- * @return{obj} folder Id
- * */
-async function createFolder(auth, filename) {
-  // Get credentials and build service
-  // TODO (developer) - Use appropriate auth mechanism for your app
-  const {google} = require('googleapis');
-
-  const service = google.drive({version: 'v3', auth});
-
-  const fileMetadata = {
-    name: filename,
-    mimeType: 'application/vnd.google-apps.folder',
-  };
-  try {
-    const file = await service.files.create({
-      resource: fileMetadata,
-      fields: 'id',
-      properties: {
-        folderColorRgb: "330033"
-      }
-    });
-    console.log('Folder Id:', file.data.id);
-    return file.data.id;
-  } catch (err) {
-    // TODO(developer) - Handle error
-    throw err;
-  }
-}
-
-/**
- * Change the file's modification timestamp.
- * @param{string} fileId Id of the file to move
- * @param{string} folderId Id of the folder to move
- * @return{obj} file status
- * */
-async function moveFileToFolder(auth, fileId, folderId) {
-  const {google} = require('googleapis');
-
-  const service = google.drive({version: 'v3', auth});
-
-  try {
-    // Retrieve the existing parents to remove
-    const file = await service.files.get({
-      fileId: fileId,
-      fields: 'parents',
-    });
-
-    // Move the file to the new folder
-    const previousParents = file.data.parents
-        .join(',');
-    const files = await service.files.update({
-      fileId: fileId,
-      addParents: folderId,
-      removeParents: previousParents,
-      fields: 'id, parents',
-    });
-    console.log(files.status);
-    return files.status;
-  } catch (err) {
-    // TODO(developer) - Handle error
-    throw err;
-  }
-}
-
-/**
- * Create a google spreadsheet
- * @param {string} title Spreadsheets title
- * @return {string} Created spreadsheets ID
- */
-async function create(auth, title) { // So things google says is async NEEDS to be async (good to know I guess)
-    const {google} = require('googleapis');
-
-    const service = google.sheets({version: 'v4', auth});
-    const resource = {
-      properties: {
-        title,
-      },
-    };
+    const batchUpdateRequest = {requests};
     try {
-      const spreadsheet = await service.spreadsheets.create({
-        resource,
-        fields: 'spreadsheetId',
-      });
-      console.log(`Spreadsheet ID: ${spreadsheet.data.spreadsheetId}`);
-      return `${spreadsheet.data.spreadsheetId}`;
+        const response = await service.spreadsheets.batchUpdate({
+        spreadsheetId: ssID,
+        resource: batchUpdateRequest,
+        });
+        return response;
     } catch (err) {
-      // TODO (developer) - Handle exception
-      throw err;
+        throw err;
     }
 }
 
@@ -371,10 +379,8 @@ async function updateValues(auth, spreadsheetId, sheetName, range, valueInputOpt
  * @param {int} sheetTo
  */
 async function moveCompletedTasks(auth, spreadsheetId, sheetFrom, sheetFromName, sheetTo, sheetToName) {
-  // Reading 'Completed' row of 'sheetFrom'
   let completedChecklist;
   let completedDataList = [];
-//   const tryThis = () => {
     readData(auth, spreadsheetId, sheetFromName, 'A2:E').then(
             (value) => {
                 completedChecklist = value;
@@ -387,7 +393,6 @@ async function moveCompletedTasks(auth, spreadsheetId, sheetFrom, sheetFromName,
                       deleteRow(auth, spreadsheetId, sheetFrom, i+2);
                   }
                 }
-                // console.log(completedDataList);
                 return completedDataList;
             }
         ).then(
@@ -397,26 +402,6 @@ async function moveCompletedTasks(auth, spreadsheetId, sheetFrom, sheetFromName,
                 appendData(auth, spreadsheetId, sheetToName, dataList);
             }
         )
-    // .catch(tryThis());
-//   }
-
-  // TODO - TRY RUNNING ALL THE COMMANDS INSIDE OF THE readData .then() function!!!!!!
-  // TODO - Implement something so that it waits for promise to stop pending... (if pending takes too long, then let the user know if they wanna wait longer or just stop)
-//   setTimeout(() => {
-//     console.log(completedChecklist);
-//     for (let i = 0; i < completedChecklist.length; i++) {
-//       if (completedChecklist[i][4] == 'TRUE') {
-//         completedDataList.push(completedChecklist[i]);
-//         // Delete each completed row
-//         deleteRow(auth, spreadsheetId, sheetFrom, i+2);
-//       }
-//     }
-//     console.log(completedDataList);
-
-//     // TODO - Saving data of each row of the tasks that have been completed
-//     // TODO - Once promise is completed, THEN complete message is sent, and then the next code can be completed
-//     appendData(auth, spreadsheetId, sheetToName, completedDataList);
-//   }, 1000);
   return 200; // Code 200 means successful
 }
 
@@ -429,7 +414,7 @@ async function moveCompletedTasks(auth, spreadsheetId, sheetFrom, sheetFromName,
  * @param {boolean} moveToCompletedTabOrNot
  */
 async function markedAsComplete(auth, spreadsheetId, taskNum, sheetFrom, sheetFromName, sheetTo, sheetToName, moveToCompletedTabOrNot = false) {
-    // TODO — I have an IDEA, Don't even have a "completed" tab, just move the task immediately to the "completed" tab
+    // TODO — I have an IDEA, Don't even have a "completed" tab, just move the task immediately to the "completed" tab (don't need to file data to "TRUE")
     taskNum = taskNum + 2;  // Array's first item is 0 but it's going to start reading from 'A2:E'
     updateValues(auth, spreadsheetId, sheetFromName, `E${taskNum}`, "USER_ENTERED", [["=TRUE()"]]).then(
         () => {
@@ -439,7 +424,6 @@ async function markedAsComplete(auth, spreadsheetId, taskNum, sheetFrom, sheetFr
         }
     );
 
-
   // TODO — So in the countdown function, run this function once the timer reaches 0
   // TODO - The counting down functionality is handled by the device (and we are periodically going to update it on the spreadsheet (We have a limit of 10 per second))
   return 200;
@@ -447,100 +431,29 @@ async function markedAsComplete(auth, spreadsheetId, taskNum, sheetFrom, sheetFr
 
 //TODO — Write Function that detects if changes have been made to the file (https://developers.google.com/drive/api/guides/manage-changes)
 
+
 const authorization = authorize();
 // let ssID;
 let ssID = '1o9m8Lp6UnxyrzEYFIh0LYw4sXPKQv4k3bzFl5bOmHqk';
 let dataKeys = [['Date Created', 'Date Due', 'Time Duration Goal', 'Time Remaining', 'Completed', 'Currently Active']]; // TODO - When a different device sees "currently active" is true, then run that task (count down the timer)
 let sheetIDList;
 let testDrive;
-// authorization.then(
-//   (auth) => {
-//     return create(auth, "finally2");
-//   }
-// ).then((id) => {console.log(ssID= id);}).catch(console.error);
 
-// setTimeout(() => {
-//   // console.log(ssID);
-//   authorization.then(
-//     (auth) => {
-//       return appendData(auth, ssID, dataKeys);
-//     }
-//   ).catch(console.error);
-// }, 1000);
-
-// setTimeout(() => {
-//   authorization.then(
-//     (auth) => {readData(auth, ssID);}
-//     ).catch(console.error);
-// }, 2000);
-
-// setTimeout(() => {
-//   authorization.then(
-//     (auth) => {
-//       // deleteSheetTab(auth, ssID, 2087531897);  // TODO - Figure out how to list all tabs and their corresponding sheetTabID
-//       return getSheets(auth, ssID);
-//     }
-//   ).then((a) => {sheetIDList = a; console.log(sheetIDList)}).catch(console.error);
-// }, 3000);
-
-// setTimeout(() => {
-//   console.log(sheetIDList);
-//   authorization.then(
-//     (auth) => {
-//       return createFolder(auth, "Time Management");
-//     }
-//   ).then((fileID) => {testDrive = fileID}).catch(console.error);
-// }, 4000);
-
-// setTimeout(() => {
-//   authorization.then(
-//     (auth) => {
-//       moveFileToFolder(auth, ssID, testDrive);
-//     }
-//   ).catch(console.error);
-// }, 5000);
-
-// setTimeout(() => {
-//   authorization.then(
-//     (auth) => {createNewSheetTab(auth, ssID);}
-//   ).catch(console.error);
-// }, 3000);
-
-// setTimeout(() => {
-//   authorization.then(
-//     (auth) => {
-//       // console.log(test[0][1])
-//       deleteRow(auth, ssID, sheetIDList[0][1], 1);
-//     }
-//   ).catch(console.error);
-// }, 5000);
-
-// setTimeout(() => {
-//   authorization.then(
-//     (auth) => {
-//       updateValues(auth, ssID, `${sheetIDList[0][0]}!A2:D`, 'USER_ENTERED', [['Hey', 'I', 'Did','It'], ['Did', 'This', 'Change', 'Too?']]);
-//     }
-//   ).catch(console.error);
-// }, 5000);
-
-
-authorization.then(
-    (auth) => {
-      // deleteSheetTab(auth, ssID, 2087531897);  // TODO - Figure out how to list all tabs and their corresponding sheetTabID
-      return getSheets(auth, ssID);  // TODO — Save sheetIDList locally on device!! (Save API calls)
-    }
-).then((a) => {sheetIDList = a; console.log(sheetIDList)}).catch(console.error);
-setTimeout(() => {
-  authorization.then(
-    (auth) => {
-      return (markedAsComplete(auth, ssID, 3, sheetIDList[1][1], sheetIDList[1][0], sheetIDList[2][1], sheetIDList[2][0], true));
-    }
-  ).then(
-    (x) => {
-        console.log(x);
-    }
-  )
-}, 2000);
-
-//TODO - In the catch condition, (so when an error is thrown), try to execute the command again for like 15 seconds (once 5 seconds from time of execution, and once again 10 seconds, and a last time 25 seconds later) or something just in case it's just a slow promise. If it still throws an error, then you can just stop then
 // TODO — A batch update is considered 1 API call!!! Try to make everything as a batch update as much as possible!!
+
+export {authorize, createSpreadsheet, createFolder, moveFileToFolder, markedAsComplete};
+// module.exports.authorize = authorize;
+// module.exports.loadSavedCredentialsIfExist = loadSavedCredentialsIfExist;
+// module.exports.saveCredentials = saveCredentials;
+// module.exports.createSpreadsheet = createSpreadsheet;
+// module.exports.createFolder = createFolder;
+// module.exports.moveFileToFolder = moveFileToFolder;
+// module.exports.createNewSheetTab = createNewSheetTab;
+// module.exports.getSheets = getSheets;
+// module.exports.deleteSheetTab = deleteSheetTab;
+// module.exports.readData = readData;
+// module.exports.appendData = appendData;
+// module.exports.deleteRow = deleteRow;
+// module.exports.updateValues = updateValues;
+// module.exports.moveCompletedTasks = moveCompletedTasks;
+// module.exports.markedAsComplete = markedAsComplete;
