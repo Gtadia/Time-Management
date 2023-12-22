@@ -232,7 +232,7 @@ const getSheets = async (auth, spreadsheetId) => {
 
   const sheets = google.sheets({version: "v4", auth});
   const result = (await sheets.spreadsheets.get({
-    spreadsheetId 
+    spreadsheetId
   })).data.sheets.map((sheet) => {
     return [sheet.properties.title, sheet.properties.sheetId]
   })
@@ -371,8 +371,6 @@ async function updateValues(auth, spreadsheetId, sheetName, range, valueInputOpt
  * @param {int} sheetTo
  */
 async function moveCompletedTasks(auth, spreadsheetId, sheetFrom, sheetFromName, sheetTo, sheetToName) {
-  const {google} = require('googleapis');
-
   // Reading 'Completed' row of 'sheetFrom'
   let completedChecklist;
   let completedDataList = [];
@@ -381,19 +379,22 @@ async function moveCompletedTasks(auth, spreadsheetId, sheetFrom, sheetFromName,
             (value) => {
                 completedChecklist = value;
                 isPromisePending.pop();
-                console.log(completedChecklist);
                 for (let i = 0; i < completedChecklist.length; i++) {
                   if (completedChecklist[i][4] == 'TRUE') {
                       completedDataList.push(completedChecklist[i]);
+                      console.log(completedDataList + "\t --- \t" + i);
                       // Delete each completed row
                       deleteRow(auth, spreadsheetId, sheetFrom, i+2);
                   }
                 }
-                console.log(completedDataList);
-
-                // TODO - Saving data of each row of the tasks that have been completed
-                // TODO - Once promise is completed, THEN complete message is sent, and then the next code can be completed
-                appendData(auth, spreadsheetId, sheetToName, completedDataList);
+                // console.log(completedDataList);
+                return completedDataList;
+            }
+        ).then(
+            // TODO - Saving data of each row of the tasks that have been completed
+            // TODO - Once promise is completed, THEN complete message is sent, and then the next code can be completed
+            (dataList) => {
+                appendData(auth, spreadsheetId, sheetToName, dataList);
             }
         )
     // .catch(tryThis());
@@ -429,11 +430,15 @@ async function moveCompletedTasks(auth, spreadsheetId, sheetFrom, sheetFromName,
  */
 async function markedAsComplete(auth, spreadsheetId, taskNum, sheetFrom, sheetFromName, sheetTo, sheetToName, moveToCompletedTabOrNot = false) {
     // TODO — I have an IDEA, Don't even have a "completed" tab, just move the task immediately to the "completed" tab
-    updateValues(auth, spreadsheetId, sheetFrom, `E${taskNum}:E${taskNum}`, "USER_ENTERED", "=TRUE()");
+    taskNum = taskNum + 2;  // Array's first item is 0 but it's going to start reading from 'A2:E'
+    updateValues(auth, spreadsheetId, sheetFromName, `E${taskNum}`, "USER_ENTERED", [["=TRUE()"]]).then(
+        () => {
+            if (moveToCompletedTabOrNot) {
+                moveCompletedTasks(auth, spreadsheetId, sheetFrom, sheetFromName, sheetTo, sheetToName);
+            }
+        }
+    );
 
-    if (moveToCompletedTabOrNot) {
-      moveCompletedTasks(auth, spreadsheetId, sheetFrom, sheetFromName, sheetTo, sheetToName);
-    }
 
   // TODO — So in the countdown function, run this function once the timer reaches 0
   // TODO - The counting down functionality is handled by the device (and we are periodically going to update it on the spreadsheet (We have a limit of 10 per second))
@@ -522,21 +527,20 @@ let testDrive;
 authorization.then(
     (auth) => {
       // deleteSheetTab(auth, ssID, 2087531897);  // TODO - Figure out how to list all tabs and their corresponding sheetTabID
-      return getSheets(auth, ssID);
+      return getSheets(auth, ssID);  // TODO — Save sheetIDList locally on device!! (Save API calls)
     }
 ).then((a) => {sheetIDList = a; console.log(sheetIDList)}).catch(console.error);
 setTimeout(() => {
   authorization.then(
     (auth) => {
-      moveCompletedTasks(auth, ssID, sheetIDList[1][1], sheetIDList[1][0], sheetIDList[2][1], sheetIDList[2][0]);
+      return (markedAsComplete(auth, ssID, 3, sheetIDList[1][1], sheetIDList[1][0], sheetIDList[2][1], sheetIDList[2][0], true));
     }
-  ).catch(console.error);
-
-  authorization.then(
-    (auth) => {
-      console.log(markedAsComplete(auth, ssID, 2, sheetIDList[1][1], sheetIDList[1][0], sheetIdList[2][1], sheetIdList[2][0], true));
+  ).then(
+    (x) => {
+        console.log(x);
     }
   )
 }, 2000);
 
 //TODO - In the catch condition, (so when an error is thrown), try to execute the command again for like 15 seconds (once 5 seconds from time of execution, and once again 10 seconds, and a last time 25 seconds later) or something just in case it's just a slow promise. If it still throws an error, then you can just stop then
+// TODO — A batch update is considered 1 API call!!! Try to make everything as a batch update as much as possible!!
