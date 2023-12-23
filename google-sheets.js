@@ -1,5 +1,7 @@
 /**
+ * Returning 'commonjs''s require function in the 'module' type
  * @ese https://stackoverflow.com/questions/69099763/referenceerror-require-is-not-defined-in-es-module-scope-you-can-use-import-in
+ * @see https://dev.to/caspergeek/how-to-use-require-in-ecmascript-modules-1l42
  */
 import { createRequire } from "module";
 const require = createRequire(import.meta.url);
@@ -15,7 +17,6 @@ const { create } = require('domain');
 const SCOPES = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive'];
 const TOKEN_PATH = path.join(process.cwd(), 'token.json');
 const CREDENTIALS_PATH = path.join(process.cwd(), 'credentials.json');
-let isPromisePending = [];
 
 /**
  * Load or request or authorization to call APIs.
@@ -75,7 +76,7 @@ async function saveCredentials(client) {
  * @param {string} title Spreadsheets title
  * @return {string} Created spreadsheets ID
  */
-async function createSpreadsheet(auth, title = 'Time Management App', sheetNames = ['upcoming', 'current', 'completed']) { // So things google says is async NEEDS to be async (good to know I guess)
+async function createSpreadsheet(auth, title = 'Time Management App', sheetNames = ['Upcoming', 'Current', 'Completed']) { // So things google says is async NEEDS to be async (good to know I guess)
     const service = google.sheets({version: 'v4', auth});
     const resource = {
         properties: {
@@ -192,7 +193,7 @@ async function moveFileToFolder(auth, fileId, folderId) {
 async function createNewSheetTab(auth, ssID) { // TODO - Add title param and color obj
     const service = google.sheets({ version: 'v4', auth });
     const requests = [];
-  
+
     const title = 'current';
     const title1 = 'time management';
     const spreadsheetId = ssID;
@@ -276,18 +277,17 @@ async function deleteSheetTab(auth, ssID, sheetTabID) {
  * @see https://docs.google.com/spreadsheets/d/1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms/edit
  * @param {google.auth.OAuth2} auth The authenticated Google OAuth client.
  */
-async function readData(auth, ssID, sheetName = 'current', range = 'A2:E') {
-  isPromisePending.push(true);
+async function readData(auth, spreadsheetId, sheetName = 'Current', range = 'A2:F') {
   const sheets = google.sheets({version: 'v4', auth});
   const res = await sheets.spreadsheets.values.get({
-    spreadsheetId: ssID,
+    spreadsheetId,
     range: `${sheetName}!${range}`,
   });
   const rows = res.data.values;
   return rows;
 }
 
-async function appendData(auth, ssID, sheetName, values) {
+async function appendData(auth, spreadsheetId, sheetName, values) {
   const sheets = google.sheets({ version: 'v4', auth });
 
   const resource = {
@@ -295,7 +295,7 @@ async function appendData(auth, ssID, sheetName, values) {
   };
   sheets.spreadsheets.values.append(
     {
-      spreadsheetId: ssID,
+      spreadsheetId,
       range: `${sheetName}!A2`,
       valueInputOption: 'USER_ENTERED',
       resource: resource,
@@ -370,6 +370,54 @@ async function updateValues(auth, spreadsheetId, sheetName, range, valueInputOpt
   }
 }
 
+async function initialSetup(auth, dataKeys) {
+    const service = google.sheets({ version: 'v4', auth });
+    const requests = [];
+
+    const spreadsheetId = await createSpreadsheet(auth);
+    const folderId = await createFolder(auth);
+    await moveFileToFolder(auth, spreadsheetId, folderId);
+
+    const sheetList = await getSheets(auth, spreadsheetId);
+
+    for (let i = 0; i < dataKeys.length; i++) {
+        dataKeys[i] = {
+            userEnteredValue: {
+                stringValue: dataKeys[i]
+            }
+        }
+    }
+    sheetList.forEach(
+        (i) => {
+            requests.push({
+                appendCells: {
+                    rows: [
+                      {
+                        values: dataKeys
+                      }
+                    ],
+                    fields: "userEnteredValue",
+                    sheetId: i[1]
+                  }
+            });
+        }
+    )
+
+    const batchUpdateRequest = {requests};
+    try {
+        const response = await service.spreadsheets.batchUpdate({
+            spreadsheetId,
+            resource: batchUpdateRequest,
+        });
+
+        return [spreadsheetId, folderId, sheetList, response];
+        // return response;
+    } catch (err) {
+        // TODO (developer) - Handle exception
+        throw err;
+    }
+}
+
 /**
  * Moves cells from one sheet tab to another sheet tab (sheetFrom - today or upcoming) (sheetTo)
  * @param {string} auth
@@ -379,30 +427,78 @@ async function updateValues(auth, spreadsheetId, sheetName, range, valueInputOpt
  * @param {int} sheetTo
  */
 async function moveCompletedTasks(auth, spreadsheetId, sheetFrom, sheetFromName, sheetTo, sheetToName) {
-  let completedChecklist;
-  let completedDataList = [];
-    readData(auth, spreadsheetId, sheetFromName, 'A2:E').then(
+    const service = google.sheets({ version: 'v4', auth });
+    const requests = [];
+
+    let completedDataList = [];
+    await readData(auth, spreadsheetId).then(
             (value) => {
-                completedChecklist = value;
-                isPromisePending.pop();
-                for (let i = 0; i < completedChecklist.length; i++) {
-                  if (completedChecklist[i][4] == 'TRUE') {
-                      completedDataList.push(completedChecklist[i]);
-                      console.log(completedDataList + "\t --- \t" + i);
-                      // Delete each completed row
-                      deleteRow(auth, spreadsheetId, sheetFrom, i+2);
-                  }
+                for (let i = 0; i < value.length; i++) {
+                    if (value[i][4] == 'TRUE') {
+                        completedDataList.push([value[i], i+2]);
+                        console.log(completedDataList + "\t --- \t" + i);
+                    }
                 }
                 return completedDataList;
             }
         ).then(
-            // TODO - Saving data of each row of the tasks that have been completed
-            // TODO - Once promise is completed, THEN complete message is sent, and then the next code can be completed
             (dataList) => {
-                appendData(auth, spreadsheetId, sheetToName, dataList);
+                let rowNum;
+                for (let j = dataList.length - 1; j >=0; j--) {
+                    rowNum = dataList[j];
+                    for (let i = 0; i < rowNum[0].length; i++) {
+                        rowNum[0][i] = {
+                            userEnteredValue: {
+                                stringValue: rowNum[0][i]
+                            }
+                        }
+                    }
+
+                    requests.push({
+                        appendCells: {
+                                rows:[
+                                    {
+                                        values: rowNum[0]
+                                    }
+                                ],
+                                fields: "userEnteredValue",
+                                sheetId: sheetTo
+                            }
+                    });
+
+                    requests.push({
+                        deleteDimension: {
+                            range: {
+                                sheetId: sheetFrom,
+                                dimension: "ROWS",
+                                startIndex: rowNum[1] - 1,
+                                endIndex: rowNum[1]
+                            }
+                        }
+                    });
+                }
+            }
+        ).catch(
+            (e) => {
+                if (e instanceof TypeError) {
+                    console.log("The spreadsheet doesn't have any data yet/it's empty");
+                    return; // Return the error message or something (or a specific code (ex: 200)) so that the react app can do something with it
+                } else {
+                    console.error;
+                }
             }
         )
-  return 200; // Code 200 means successful
+    const batchUpdateRequest = {requests};
+    try {
+        const response = await service.spreadsheets.batchUpdate({
+            spreadsheetId,
+            resource: batchUpdateRequest,
+        });
+        return response;
+    } catch (err) {
+        // TODO (developer) - Handle exception
+        throw err;
+    }
 }
 
 /**
@@ -414,7 +510,6 @@ async function moveCompletedTasks(auth, spreadsheetId, sheetFrom, sheetFromName,
  * @param {boolean} moveToCompletedTabOrNot
  */
 async function markedAsComplete(auth, spreadsheetId, taskNum, sheetFrom, sheetFromName, sheetTo, sheetToName, moveToCompletedTabOrNot = false) {
-    // TODO — I have an IDEA, Don't even have a "completed" tab, just move the task immediately to the "completed" tab (don't need to file data to "TRUE")
     taskNum = taskNum + 2;  // Array's first item is 0 but it's going to start reading from 'A2:E'
     updateValues(auth, spreadsheetId, sheetFromName, `E${taskNum}`, "USER_ENTERED", [["=TRUE()"]]).then(
         () => {
@@ -424,9 +519,9 @@ async function markedAsComplete(auth, spreadsheetId, taskNum, sheetFrom, sheetFr
         }
     );
 
-  // TODO — So in the countdown function, run this function once the timer reaches 0
-  // TODO - The counting down functionality is handled by the device (and we are periodically going to update it on the spreadsheet (We have a limit of 10 per second))
-  return 200;
+    // TODO — So in the countdown function, run this function once the timer reaches 0
+    // TODO - The counting down functionality is handled by the device (and we are periodically going to update it on the spreadsheet (We have a limit of 10 per second))
+    return 200;
 }
 
 //TODO — Write Function that detects if changes have been made to the file (https://developers.google.com/drive/api/guides/manage-changes)
@@ -441,19 +536,4 @@ let testDrive;
 
 // TODO — A batch update is considered 1 API call!!! Try to make everything as a batch update as much as possible!!
 
-export {authorize, createSpreadsheet, createFolder, moveFileToFolder, markedAsComplete};
-// module.exports.authorize = authorize;
-// module.exports.loadSavedCredentialsIfExist = loadSavedCredentialsIfExist;
-// module.exports.saveCredentials = saveCredentials;
-// module.exports.createSpreadsheet = createSpreadsheet;
-// module.exports.createFolder = createFolder;
-// module.exports.moveFileToFolder = moveFileToFolder;
-// module.exports.createNewSheetTab = createNewSheetTab;
-// module.exports.getSheets = getSheets;
-// module.exports.deleteSheetTab = deleteSheetTab;
-// module.exports.readData = readData;
-// module.exports.appendData = appendData;
-// module.exports.deleteRow = deleteRow;
-// module.exports.updateValues = updateValues;
-// module.exports.moveCompletedTasks = moveCompletedTasks;
-// module.exports.markedAsComplete = markedAsComplete;
+export {authorize, createSpreadsheet, createFolder, moveFileToFolder, getSheets, readData, appendData, updateValues, moveCompletedTasks, markedAsComplete, initialSetup};

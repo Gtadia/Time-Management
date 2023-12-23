@@ -94,7 +94,7 @@ async function readData(auth, ssID, sheetName = 'current', range = 'A2:E') {
   // });
 }
 
-async function appendData(auth, ssID, sheetName, values) {
+async function appendData(auth, spreadsheetId, sheetName, values) {
   const sheets = google.sheets({ version: 'v4', auth });
 
   const resource = {
@@ -102,7 +102,7 @@ async function appendData(auth, ssID, sheetName, values) {
   };
   sheets.spreadsheets.values.append(
     {
-      spreadsheetId: ssID,
+      spreadsheetId,
       range: `${sheetName}!A2`,
       valueInputOption: 'USER_ENTERED',
       resource: resource,
@@ -358,16 +358,16 @@ async function updateValues(auth, spreadsheetId, sheetName, range, valueInputOpt
  */
 async function moveCompletedTasks(auth, spreadsheetId, sheetFrom, sheetFromName, sheetTo, sheetToName) {
   // Reading 'Completed' row of 'sheetFrom'
-  let completedChecklist;
+  let value;
   let completedDataList = [];
 //   const tryThis = () => {
     readData(auth, spreadsheetId, sheetFromName, 'A2:E').then(
             (value) => {
-                completedChecklist = value;
+                value = value;
                 isPromisePending.pop();
-                for (let i = 0; i < completedChecklist.length; i++) {
-                  if (completedChecklist[i][4] == 'TRUE') {
-                      completedDataList.push(completedChecklist[i]);
+                for (let i = 0; i < value.length; i++) {
+                  if (value[i][4] == 'TRUE') {
+                      completedDataList.push(value[i]);
                       console.log(completedDataList + "\t --- \t" + i);
                       // Delete each completed row
                       deleteRow(auth, spreadsheetId, sheetFrom, i+2);
@@ -389,10 +389,10 @@ async function moveCompletedTasks(auth, spreadsheetId, sheetFrom, sheetFromName,
   // TODO - TRY RUNNING ALL THE COMMANDS INSIDE OF THE readData .then() function!!!!!!
   // TODO - Implement something so that it waits for promise to stop pending... (if pending takes too long, then let the user know if they wanna wait longer or just stop)
 //   setTimeout(() => {
-//     console.log(completedChecklist);
-//     for (let i = 0; i < completedChecklist.length; i++) {
-//       if (completedChecklist[i][4] == 'TRUE') {
-//         completedDataList.push(completedChecklist[i]);
+//     console.log(value);
+//     for (let i = 0; i < value.length; i++) {
+//       if (value[i][4] == 'TRUE') {
+//         completedDataList.push(value[i]);
 //         // Delete each completed row
 //         deleteRow(auth, spreadsheetId, sheetFrom, i+2);
 //       }
