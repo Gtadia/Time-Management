@@ -349,8 +349,6 @@ async function deleteRow(auth, ssID, sheetTabID, rowNum) {
  * @return {obj} spreadsheet information
  */
 async function updateValues(auth, spreadsheetId, sheetName, range, valueInputOption, values) {
-  const {google} = require('googleapis');
-
   const service = google.sheets({version: 'v4', auth});
   const resource = {
     values,
@@ -426,16 +424,16 @@ async function initialSetup(auth, dataKeys) {
  * @param {string} sheetFromName
  * @param {int} sheetTo
  */
-async function moveCompletedTasks(auth, spreadsheetId, sheetFrom, sheetFromName, sheetTo, sheetToName) {
+async function moveCompletedTasks(auth, spreadsheetId, sheetFrom, sheetFromName, sheetTo, sheetToName, startIndex = 2) {
     const service = google.sheets({ version: 'v4', auth });
     const requests = [];
 
     let completedDataList = [];
-    await readData(auth, spreadsheetId).then(
+    await readData(auth, spreadsheetId, sheetFromName, `A${startIndex}:F`).then(
             (value) => {
                 for (let i = 0; i < value.length; i++) {
                     if (value[i][4] == 'TRUE') {
-                        completedDataList.push([value[i], i+2]);
+                        completedDataList.push([value[i], i + startIndex]);
                         console.log(completedDataList + "\t --- \t" + i);
                     }
                 }
@@ -509,12 +507,13 @@ async function moveCompletedTasks(auth, spreadsheetId, sheetFrom, sheetFromName,
  * @param {string} sheetName
  * @param {boolean} moveToCompletedTabOrNot
  */
-async function markedAsComplete(auth, spreadsheetId, taskNum, sheetFrom, sheetFromName, sheetTo, sheetToName, moveToCompletedTabOrNot = false) {
+// TODO — See if I can merge append (Or read the task and save it to a variable) to reduce number of api calls to at most 2
+async function markAsComplete(auth, spreadsheetId, taskNum, sheetFrom, sheetFromName, sheetTo, sheetToName, moveToCompletedTabOrNot = false) {
     taskNum = taskNum + 2;  // Array's first item is 0 but it's going to start reading from 'A2:E'
     updateValues(auth, spreadsheetId, sheetFromName, `E${taskNum}`, "USER_ENTERED", [["=TRUE()"]]).then(
         () => {
             if (moveToCompletedTabOrNot) {
-                moveCompletedTasks(auth, spreadsheetId, sheetFrom, sheetFromName, sheetTo, sheetToName);
+                moveCompletedTasks(auth, spreadsheetId, sheetFrom, sheetFromName, sheetTo, sheetToName, taskNum);
             }
         }
     );
@@ -527,13 +526,12 @@ async function markedAsComplete(auth, spreadsheetId, taskNum, sheetFrom, sheetFr
 //TODO — Write Function that detects if changes have been made to the file (https://developers.google.com/drive/api/guides/manage-changes)
 
 
-const authorization = authorize();
 // let ssID;
 let ssID = '1o9m8Lp6UnxyrzEYFIh0LYw4sXPKQv4k3bzFl5bOmHqk';
-let dataKeys = [['Date Created', 'Date Due', 'Time Duration Goal', 'Time Remaining', 'Completed', 'Currently Active']]; // TODO - When a different device sees "currently active" is true, then run that task (count down the timer)
-let sheetIDList;
-let testDrive;
-
+// TODO - When a different device sees "currently active" is true, then run that task (count down the timer)
 // TODO — A batch update is considered 1 API call!!! Try to make everything as a batch update as much as possible!!
 
-export {authorize, createSpreadsheet, createFolder, moveFileToFolder, getSheets, readData, appendData, updateValues, moveCompletedTasks, markedAsComplete, initialSetup};
+// TODO - Shorten the exports to just the functions that I need
+export {authorize, createSpreadsheet, createFolder, moveFileToFolder, getSheets, readData, appendData, updateValues, moveCompletedTasks, markAsComplete, initialSetup};
+
+// Todo — NOW CREATE A FUNCTION THAT MOVES TASKS FROM the completed tab BACK TO current/upcoming
