@@ -176,7 +176,6 @@ async function markAsComplete(auth, spreadsheetId, taskNum, sheetFrom, sheetFrom
     return 200;
 }
 
-// Todo — NOW CREATE A FUNCTION THAT MOVES TASKS FROM the completed tab BACK TO current/upcoming
 async function moveTaskOutOfCompleted(auth, spreadsheetId, taskNum, sheetList, date_today, reset_timer = false) {
     // date_today = date_today.toString();
     taskNum = taskNum + 2;
