@@ -1,5 +1,5 @@
-import {authorize, createSpreadsheet, createFolder, moveFileToFolder, getSheets, readData, appendData, updateValues, moveCompletedTasks, markAsComplete, initialSetup, moveTaskOutOfCompleted} from './google-sheets.js';
-
+import {moveCompletedTasks, markAsComplete, initialSetup, moveTaskOutOfCompleted} from './google-sheets.js';
+import {authorize} from './google-sheets-basic.js'
 // const dataKeys = [['Date Created', 'Date Due', 'Time Duration Goal', 'Time Remaining', 'Completed', 'Currently Active']];
 const dataKeys = ['Date Created', 'Date Due', 'Time Duration Goal', 'Time Remaining', 'Title', 'Description', 'Completed', 'Currently Active'];
 const testData = [['=DATE(2023, 12, 22)', '=DATE(2023, 12, 22)', '=TIME(2, 36, 12)', '=TIME(1, 2, 0)', '=ASC("Hi")', '=ASC("Description")', '=FALSE()', '']];
