@@ -5,7 +5,7 @@
     // So essentially, it can go anywhere as long as the file paths are corrected for it
 import React from 'react';
 import { createRoot } from 'react-dom/client';
-import App from './src/App.js';
+import App from './App.js';
 
 const container = document.getElementById('root');
 const root = createRoot(container);
