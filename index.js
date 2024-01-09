@@ -1,5 +1,5 @@
-import {moveCompletedTasks, markAsComplete, initialSetup, moveTaskOutOfCompleted, fetchStartPageToken} from './google-sheets.js';
-import {authorize} from './google-basic.js'
+import {moveCompletedTasks, markAsComplete, initialSetup, moveTaskOutOfCompleted} from './google-sheets.js';
+import {authorize, fetchStartPageToken} from './google-basic.js'
 import { yearMonthDay } from './helper-functions.js';
 
 // const dataKeys = [['Date Created', 'Date Due', 'Time Duration Goal', 'Time Remaining', 'Completed', 'Currently Active']];
@@ -28,12 +28,11 @@ console.log("Sheet List: " + sheetList);
 
 // await moveCompletedTasks(auth, spreadsheetId, sheetList[1][1], sheetList[1][0], sheetList[2][1], sheetList[2][0]);
 // await markAsComplete(auth, spreadsheetId, 1, sheetList[1][1], sheetList[1][0], sheetList[2][1], sheetList[2][0], true);
-const driveToken = (fetchStartPageToken(auth, spreadsheetId));
+const driveToken = await (fetchStartPageToken(auth, spreadsheetId));
 
-let date = new Date();  // TODO — Make sure to have the system be notified when it's a new day and update today's date
-let formattedDate = yearMonthDay(date);
-
-await moveTaskOutOfCompleted(auth, spreadsheetId, 0, sheetList, `=DATE(${formattedDate})`, true);
+// let date = new Date();  // TODO — Make sure to have the system be notified when it's a new day and update today's date
+// let formattedDate = yearMonthDay(date);
+// await moveTaskOutOfCompleted(auth, spreadsheetId, 0, sheetList, `=DATE(${formattedDate})`, true);
 
 // TODO — Logout function (probably in google-sheets.js)
 // TODO — Create a file in google drive that checks for the correct folder (when they login from a new device) and checks if it was created by us (checks for .txt/.json file)
