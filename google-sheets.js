@@ -6,7 +6,7 @@
 import { createRequire } from "module";
 const require = createRequire(import.meta.url);
 
-import {createSpreadsheet, createFolder, moveFileToFolder, getSheets, readData, updateValues} from './google-sheets-basic.js';
+import {createSpreadsheet, createFolder, moveFileToFolder, getSheets, readData, updateValues} from './google-basic.js';
 
 const {google} = require('googleapis');
 
